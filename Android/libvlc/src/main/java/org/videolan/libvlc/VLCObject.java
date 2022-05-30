@@ -23,29 +23,36 @@ package org.videolan.libvlc;
 import android.os.Handler;
 import android.os.Looper;
 
-import androidx.annotation.Nullable;
-
-import org.videolan.libvlc.interfaces.AbstractVLCEvent;
-import org.videolan.libvlc.interfaces.ILibVLC;
-import org.videolan.libvlc.interfaces.IVLCObject;
+import java.lang.ref.WeakReference;
 
 @SuppressWarnings("JniMissingFunction")
-abstract class VLCObject<T extends AbstractVLCEvent> implements IVLCObject<T> {
-    private AbstractVLCEvent.Listener<T> mEventListener = null;
+abstract class VLCObject<T extends VLCEvent> {
+    final LibVLC mLibVLC;
+    private VLCEvent.Listener<T> mEventListener = null;
     private Handler mHandler = null;
-    final ILibVLC mILibVLC;
     private int mNativeRefCount = 1;
+    /* JNI */
+    @SuppressWarnings("unused") /* Used from JNI */
+    private long mInstance = 0;
 
-    protected VLCObject(ILibVLC libvlc) {
-        mILibVLC = libvlc;
+    protected VLCObject(LibVLC libvlc) {
+        mLibVLC = libvlc;
     }
 
-    protected VLCObject(IVLCObject parent) {
-        mILibVLC = parent.getLibVLC();
+    protected VLCObject(VLCObject parent) {
+        mLibVLC = parent.mLibVLC;
     }
 
     protected VLCObject() {
-        mILibVLC = null;
+        mLibVLC = null;
+    }
+
+    @SuppressWarnings("unchecked,unused") /* Used from JNI */
+    private static void dispatchEventFromWeakNative(Object weak, int eventType, long arg1, long arg2,
+                                                    float argf1) {
+        VLCObject obj = ((WeakReference<VLCObject>) weak).get();
+        if (obj != null)
+            obj.dispatchEventFromNative(eventType, arg1, arg2, argf1);
     }
 
     /**
@@ -57,6 +64,7 @@ abstract class VLCObject<T extends AbstractVLCEvent> implements IVLCObject<T> {
 
     /**
      * Increment internal ref count of the native object.
+     *
      * @return true if media is retained
      */
     public synchronized final boolean retain() {
@@ -69,7 +77,7 @@ abstract class VLCObject<T extends AbstractVLCEvent> implements IVLCObject<T> {
 
     /**
      * Release the native object if ref count is 1.
-     *
+     * <p>
      * After this call, native calls are not possible anymore.
      * You can still call others methods to retrieve cached values.
      * For example: if you parse, then release a media, you'll still be able to retrieve all Metas or Tracks infos.
@@ -95,33 +103,23 @@ abstract class VLCObject<T extends AbstractVLCEvent> implements IVLCObject<T> {
         }
     }
 
-    @Override
-    protected synchronized void finalize() {
-        if (!isReleased())
-            throw new AssertionError("VLCObject (" + getClass().getName() + ") finalized but not natively released (" + mNativeRefCount + " refs)");
-    }
-
-    @Override
-    public ILibVLC getLibVLC() {
-        return mILibVLC;
-    }
-
     /**
      * Set an event listener.
      * Events are sent via the android main thread.
      *
-     * @param listener see {@link AbstractVLCEvent.Listener}
+     * @param listener see {@link VLCEvent.Listener}
      */
-    protected synchronized void setEventListener(AbstractVLCEvent.Listener<T> listener) {
+    protected synchronized void setEventListener(VLCEvent.Listener<T> listener) {
         setEventListener(listener, null);
     }
 
     /**
      * Set an event listener and an executor Handler
-     * @param listener see {@link AbstractVLCEvent.Listener}
-     * @param handler Handler in which events are sent. If null, a handler will be created running on the main thread
+     *
+     * @param listener see {@link VLCEvent.Listener}
+     * @param handler  Handler in which events are sent. If null, a handler will be created running on the main thread
      */
-    protected synchronized void setEventListener(AbstractVLCEvent.Listener<T> listener, Handler handler) {
+    protected synchronized void setEventListener(VLCEvent.Listener<T> listener, Handler handler) {
         if (mHandler != null)
             mHandler.removeCallbacksAndMessages(null);
         mEventListener = listener;
@@ -135,36 +133,34 @@ abstract class VLCObject<T extends AbstractVLCEvent> implements IVLCObject<T> {
      * Called when libvlc send events.
      *
      * @param eventType event type
-     * @param arg1 first argument
-     * @param arg2 second argument
-     * @param argf1 first float argument
+     * @param arg1      first argument
+     * @param arg2      second argument
+     * @param argf1     first float argument
      * @return Event that will be dispatched to listeners
      */
-    protected abstract T onEventNative(int eventType, long arg1, long arg2, float argf1, String args1);
+    protected abstract T onEventNative(int eventType, long arg1, long arg2, float argf1);
 
     /**
      * Called when native object is released (refcount is 0).
-     *
+     * <p>
      * This is where you must release native resources.
      */
     protected abstract void onReleaseNative();
 
-    /* JNI */
-    @SuppressWarnings("unused") /* Used from JNI */
-    private long mInstance = 0;
-    private synchronized void dispatchEventFromNative(int eventType, long arg1, long arg2, float argf1, @Nullable String args1) {
+    private synchronized void dispatchEventFromNative(int eventType, long arg1, long arg2, float argf1) {
         if (isReleased())
             return;
-        final T event = onEventNative(eventType, arg1, arg2, argf1, args1);
+        final T event = onEventNative(eventType, arg1, arg2, argf1);
 
         class EventRunnable implements Runnable {
-            private final AbstractVLCEvent.Listener<T> listener;
+            private final VLCEvent.Listener<T> listener;
             private final T event;
 
-            private EventRunnable(AbstractVLCEvent.Listener<T> listener, T event) {
+            private EventRunnable(VLCEvent.Listener<T> listener, T event) {
                 this.listener = listener;
                 this.event = event;
             }
+
             @Override
             public void run() {
                 listener.onEvent(event);
@@ -175,7 +171,12 @@ abstract class VLCObject<T extends AbstractVLCEvent> implements IVLCObject<T> {
         if (event != null && mEventListener != null && mHandler != null)
             mHandler.post(new EventRunnable(mEventListener, event));
     }
+
     private native void nativeDetachEvents();
 
-    public native long getInstance();
+    /* used only before API 7: substitute for NewWeakGlobalRef */
+    @SuppressWarnings("unused") /* Used from JNI */
+    private Object getWeakReference() {
+        return new WeakReference<VLCObject>(this);
+    }
 }

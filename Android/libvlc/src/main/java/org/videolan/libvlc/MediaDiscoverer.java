@@ -20,68 +20,40 @@
 
 package org.videolan.libvlc;
 
-import androidx.annotation.Nullable;
-
-import org.videolan.libvlc.interfaces.AbstractVLCEvent;
-import org.videolan.libvlc.interfaces.ILibVLC;
+import android.support.annotation.Nullable;
 
 @SuppressWarnings("unused, JniMissingFunction")
 public class MediaDiscoverer extends VLCObject<MediaDiscoverer.Event> {
     private final static String TAG = "LibVLC/MediaDiscoverer";
-
-    public static class Event extends AbstractVLCEvent {
-
-        public static final int Started = 0x500;
-        public static final int Ended   = 0x501;
-
-        protected Event(int type) {
-            super(type);
-        }
-    }
-
-    public static class Description {
-        public static class Category {
-            /** devices, like portable music player */
-            public static final int Devices = 0;
-            /** LAN/WAN services, like Upnp, SMB, or SAP */
-            public static final int Lan = 1;
-            /** Podcasts */
-            public static final int Podcasts = 2;
-            /** Local directories, like Video, Music or Pictures directories */
-            public static final int LocalDirs = 3;
-        }
-        public final String name;
-        public final String longName;
-        public final int category;
-
-        private Description(String name, String longName, int category)
-        {
-            this.name = name;
-            this.longName = longName;
-            this.category = category;
-        }
-    }
-
-    @SuppressWarnings("unused") /* Used from JNI */
-    private static Description createDescriptionFromNative(String name, String longName, int category)
-    {
-        return new Description(name, longName, category);
-    }
-
-    public interface EventListener extends AbstractVLCEvent.Listener<MediaDiscoverer.Event> {}
-
     private MediaList mMediaList = null;
 
     /**
      * Create a MediaDiscover.
      *
-     * @param ILibVLC a valid LibVLC
-     * @param name Name of the vlc service discovery ("dsm", "upnp", "bonjour"...).
+     * @param libVLC a valid LibVLC
+     * @param name   Name of the vlc service discovery ("dsm", "upnp", "bonjour"...).
      */
-    public MediaDiscoverer(ILibVLC ILibVLC, String name) {
-        super(ILibVLC);
-        nativeNew(ILibVLC, name);
+    public MediaDiscoverer(LibVLC libVLC, String name) {
+        super(libVLC);
+        nativeNew(libVLC, name);
     }
+
+    @SuppressWarnings("unused") /* Used from JNI */
+    private static Description createDescriptionFromNative(String name, String longName, int category) {
+        return new Description(name, longName, category);
+    }
+
+    /**
+     * Get media discoverers by category
+     *
+     * @param category see {@link Description.Category}
+     */
+    @Nullable
+    public static Description[] list(LibVLC libVLC, int category) {
+        return nativeList(libVLC, category);
+    }
+
+    private static native Description[] nativeList(LibVLC libVLC, int category);
 
     /**
      * Starts the discovery. This MediaDiscoverer should be alive (not released).
@@ -109,7 +81,7 @@ public class MediaDiscoverer extends VLCObject<MediaDiscoverer.Event> {
     }
 
     @Override
-    protected Event onEventNative(int eventType, long arg1, long arg2, float argf1, @Nullable String args1) {
+    protected Event onEventNative(int eventType, long arg1, long arg2, float argf1) {
         switch (eventType) {
             case Event.Started:
             case Event.Ended:
@@ -146,19 +118,56 @@ public class MediaDiscoverer extends VLCObject<MediaDiscoverer.Event> {
         nativeRelease();
     }
 
-    /**
-     * Get media discoverers by category
-     * @param category see {@link Description.Category}
-     */
-    @Nullable
-    public static Description[] list(ILibVLC ILibVLC, int category) {
-        return nativeList(ILibVLC, category);
+    /* JNI */
+    private native void nativeNew(LibVLC libVLC, String name);
+
+    private native void nativeRelease();
+
+    private native boolean nativeStart();
+
+    private native void nativeStop();
+
+    public interface EventListener extends VLCEvent.Listener<Event> {
     }
 
-    /* JNI */
-    private native void nativeNew(ILibVLC ILibVLC, String name);
-    private native void nativeRelease();
-    private native boolean nativeStart();
-    private native void nativeStop();
-    private static native Description[] nativeList(ILibVLC ILibVLC, int category);
+    public static class Event extends VLCEvent {
+
+        public static final int Started = 0x500;
+        public static final int Ended = 0x501;
+
+        protected Event(int type) {
+            super(type);
+        }
+    }
+
+    public static class Description {
+        public final String name;
+        public final String longName;
+        public final int category;
+
+        private Description(String name, String longName, int category) {
+            this.name = name;
+            this.longName = longName;
+            this.category = category;
+        }
+
+        public static class Category {
+            /**
+             * devices, like portable music player
+             */
+            public static final int Devices = 0;
+            /**
+             * LAN/WAN services, like Upnp, SMB, or SAP
+             */
+            public static final int Lan = 1;
+            /**
+             * Podcasts
+             */
+            public static final int Podcasts = 2;
+            /**
+             * Local directories, like Video, Music or Pictures directories
+             */
+            public static final int LocalDirs = 3;
+        }
+    }
 }

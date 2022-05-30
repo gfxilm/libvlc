@@ -21,29 +21,23 @@
 package org.videolan.libvlc.util;
 
 import android.net.Uri;
-import androidx.annotation.MainThread;
+import android.support.annotation.MainThread;
 
-import org.videolan.libvlc.interfaces.ILibVLC;
 import org.videolan.libvlc.LibVLC;
-import org.videolan.libvlc.interfaces.IMedia;
 import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
 
 import java.util.ArrayList;
 
 public class Dumper {
-    public interface Listener {
-        void onFinish(boolean success);
-        void onProgress(float progress);
-    }
-
-    private final ILibVLC mILibVLC;
+    private final LibVLC mLibVLC;
     private final MediaPlayer mMediaPlayer;
     private final Listener mListener;
 
     /**
      * Create a Dumper that will download an Uri into a local filesystem path
-     * @param uri the Uri to dump
+     *
+     * @param uri      the Uri to dump
      * @param filepath local filesystem path where to dump the Uri
      * @param listener listener in order to be notified when the dump is finished
      */
@@ -62,9 +56,9 @@ public class Dumper {
         options.add("--no-audio");
         options.add("--no-spu");
         options.add("-vv");
-        mILibVLC = new LibVLC(null, options);
+        mLibVLC = new LibVLC(null, options);
 
-        final IMedia media = new Media(mILibVLC, uri);
+        final Media media = new Media(mLibVLC, uri);
         mMediaPlayer = new MediaPlayer(media);
         mMediaPlayer.setEventListener(new MediaPlayer.EventListener() {
             @Override
@@ -101,6 +95,12 @@ public class Dumper {
     public void cancel() {
         mMediaPlayer.stop();
         mMediaPlayer.release();
-        mILibVLC.release();
+        mLibVLC.release();
+    }
+
+    public interface Listener {
+        void onFinish(boolean success);
+
+        void onProgress(float progress);
     }
 }

@@ -21,40 +21,31 @@
 package org.videolan.libvlc;
 
 import android.content.Context;
+import android.os.Build;
 import android.util.Log;
 
-import androidx.annotation.Nullable;
-
-import org.videolan.libvlc.interfaces.AbstractVLCEvent;
-import org.videolan.libvlc.interfaces.ILibVLC;
+import org.videolan.libvlc.util.AndroidUtil;
 import org.videolan.libvlc.util.HWDecoderUtil;
 
 import java.util.ArrayList;
-import java.util.List;
 
 @SuppressWarnings("unused, JniMissingFunction")
-public class LibVLC extends VLCObject<ILibVLC.Event> implements ILibVLC {
+public class LibVLC extends VLCObject<LibVLC.Event> {
     private static final String TAG = "VLC/LibVLC";
-
+    private static boolean sLoaded = false;
     final Context mAppContext;
-
-    public static class Event extends AbstractVLCEvent {
-        protected Event(int type) {
-            super(type);
-        }
-    }
 
     /**
      * Create a LibVLC withs options
      *
      * @param options
      */
-    public LibVLC(Context context, List<String> options) {
+    public LibVLC(Context context, ArrayList<String> options) {
         mAppContext = context.getApplicationContext();
         loadLibraries();
 
         if (options == null)
-            options = new ArrayList<>();
+            options = new ArrayList<String>();
         boolean setAout = true, setChroma = true;
         // check if aout/vout options are already set
         for (String option : options) {
@@ -80,6 +71,20 @@ public class LibVLC extends VLCObject<ILibVLC.Event> implements ILibVLC {
                 options.add("RV16");
             }
         }
+
+        /* XXX: HACK to remove when we drop 2.3 support: force android_display vout */
+        if (!AndroidUtil.isHoneycombOrLater) {
+            boolean setVout = true;
+            for (String option : options) {
+                if (option.startsWith("--vout")) {
+                    setVout = false;
+                    break;
+                }
+            }
+            if (setVout)
+                options.add("--vout=android_display,none");
+        }
+
         nativeNew(options.toArray(new String[options.size()]), context.getDir("vlc", Context.MODE_PRIVATE).getAbsolutePath());
     }
 
@@ -90,42 +95,84 @@ public class LibVLC extends VLCObject<ILibVLC.Event> implements ILibVLC {
         this(context, null);
     }
 
+    public static synchronized void loadLibraries() {
+        if (sLoaded)
+            return;
+        sLoaded = true;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.GINGERBREAD_MR1
+                && Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            try {
+                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.HONEYCOMB_MR1)
+                    System.loadLibrary("anw.10");
+                else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.HONEYCOMB_MR2)
+                    System.loadLibrary("anw.13");
+                else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR1)
+                    System.loadLibrary("anw.14");
+                else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.KITKAT_WATCH)
+                    System.loadLibrary("anw.18");
+                else
+                    System.loadLibrary("anw.21");
+            } catch (Throwable t) {
+                Log.d(TAG, "anw library not loaded");
+            }
+
+            try {
+                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.GINGERBREAD_MR1)
+                    System.loadLibrary("iomx.10");
+                else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.HONEYCOMB_MR2)
+                    System.loadLibrary("iomx.13");
+                else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR1)
+                    System.loadLibrary("iomx.14");
+                else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.JELLY_BEAN_MR2)
+                    System.loadLibrary("iomx.18");
+                else if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.KITKAT)
+                    System.loadLibrary("iomx.19");
+            } catch (Throwable t) {
+                // No need to warn if it isn't found, when we intentionally don't build these except for debug
+                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1)
+                    Log.w(TAG, "Unable to load the iomx library: " + t);
+            }
+        }
+
+        try {
+            System.loadLibrary("vlcjni");
+            System.loadLibrary("jniloader");
+        } catch (UnsatisfiedLinkError ule) {
+            Log.e(TAG, "Can't load vlcjni library: " + ule);
+            /// FIXME Alert user
+            System.exit(1);
+        } catch (SecurityException se) {
+            Log.e(TAG, "Encountered a security issue when loading vlcjni library: " + se);
+            /// FIXME Alert user
+            System.exit(1);
+        }
+    }
+
     /**
      * Get the libVLC version
      *
      * @return the libVLC version string
      */
-    public static native String version();
-
-    /**
-     * Get the libVLC major version
-     *
-     * @return the libVLC major version, always >= 3
-     */
-    public static native int majorVersion();
+    public native String version();
 
     /**
      * Get the libVLC compiler
      *
      * @return the libVLC compiler string
      */
-    public static native String compiler();
+    public native String compiler();
 
     /**
      * Get the libVLC changeset
      *
      * @return the libVLC changeset string
      */
-    public static native String changeset();
+    public native String changeset();
 
     @Override
-    protected ILibVLC.Event onEventNative(int eventType, long arg1, long arg2, float argf1, @Nullable String args1) {
+    protected Event onEventNative(int eventType, long arg1, long arg2, float argf1) {
         return null;
-    }
-
-    @Override
-    public Context getAppContext() {
-        return mAppContext;
     }
 
     @Override
@@ -151,25 +198,9 @@ public class LibVLC extends VLCObject<ILibVLC.Event> implements ILibVLC {
 
     private native void nativeSetUserAgent(String name, String http);
 
-    private static boolean sLoaded = false;
-
-    public static synchronized void loadLibraries() {
-        if (sLoaded)
-            return;
-        sLoaded = true;
-
-        try {
-            System.loadLibrary("c++_shared");
-            System.loadLibrary("vlc");
-            System.loadLibrary("vlcjni");
-        } catch (UnsatisfiedLinkError ule) {
-            Log.e(TAG, "Can't load vlcjni library: " + ule);
-            /// FIXME Alert user
-            System.exit(1);
-        } catch (SecurityException se) {
-            Log.e(TAG, "Encountered a security issue when loading vlcjni library: " + se);
-            /// FIXME Alert user
-            System.exit(1);
+    public static class Event extends VLCEvent {
+        protected Event(int type) {
+            super(type);
         }
     }
 }
